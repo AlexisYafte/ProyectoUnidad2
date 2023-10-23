@@ -1,0 +1,404 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <limits.h>
+
+// Definición de la estructura Articulo para representar un artículo en la cola
+struct Articulo {
+	int id;
+	char descripcion[100];
+	int prioridad;
+	int contador;
+	struct Articulo* siguiente;
+	clock_t horaLlegada;
+};
+
+// Definición de la estructura ColaPrioridad para gestionar una cola de artículos
+struct ColaPrioridad {
+	struct Articulo* frente;
+	struct Articulo* final;
+};
+
+// Definición de la estructura Metricas para rastrear métricas de tiempo de retorno y rendimiento
+struct Metricas {
+	double tiempoDeRetorno;
+	double rendimiento;
+};
+
+// Inicializa una cola de prioridad con frente y final nulos
+void inicializarColaPrioridad(struct ColaPrioridad* cola) {
+	cola->frente = cola->final = NULL;
+}
+// Función para crear un artículo aleatorio y devolver un puntero a él
+struct Articulo* crearArticuloAleatorio() {
+	// Reservar memoria para un nuevo artículo en el heap y obtener un puntero a él
+	struct Articulo* nuevoArticulo = (struct Articulo*)malloc(sizeof(struct Articulo));
+	
+	// Asignar un ID aleatorio entre 0 y 999 al artículo
+	nuevoArticulo->id = rand() % 1000;
+	
+	// Crear una descripción para el artículo usando el ID generado
+	sprintf(nuevoArticulo->descripcion, "Descripción del artículo %d", nuevoArticulo->id);
+	
+	// Asignar una prioridad aleatoria entre 1 y 3 al artículo
+	nuevoArticulo->prioridad = (rand() % 3) + 1;
+	
+	// Asignar un contador aleatorio entre 20 y 100 al artículo
+	nuevoArticulo->contador = (rand() % 81) + 20;
+	
+	// Inicializar el puntero siguiente del artículo como NULL (sin elemento siguiente)
+	nuevoArticulo->siguiente = NULL;
+	
+	// Inicializar el campo horaLlegada en 0
+	nuevoArticulo->horaLlegada = 0;
+	
+	// Devolver un puntero al nuevo artículo creado
+	return nuevoArticulo;
+}
+
+// Función para encolar un artículo en una cola de prioridad en base a su prioridad
+void encolarConPrioridad(struct ColaPrioridad* cola, struct Articulo* nuevoArticulo) {
+	// Comprueba si la cola está vacía o si la prioridad del nuevo artículo es mayor que la prioridad del primer artículo en la cola
+	if (!cola->frente || nuevoArticulo->prioridad > cola->frente->prioridad) {
+		// Si la cola está vacía o el nuevo artículo tiene la mayor prioridad, se coloca al frente de la cola
+		nuevoArticulo->siguiente = cola->frente;
+		cola->frente = nuevoArticulo;
+	} else {
+		// Si no es el artículo con la mayor prioridad, se debe insertar en la posición adecuada
+		struct Articulo* actual = cola->frente;
+		struct Articulo* previo = NULL;
+		
+		// Iterar a través de la cola hasta encontrar un artículo con menor o igual prioridad que el nuevo
+		while (actual && actual->prioridad >= nuevoArticulo->prioridad) {
+			previo = actual;
+			actual = actual->siguiente;
+		}
+		
+		// Una vez se encuentra la posición adecuada, se actualizan los punteros para insertar el nuevo artículo
+		previo->siguiente = nuevoArticulo;
+		nuevoArticulo->siguiente = actual;
+	}
+	// Se registra la hora de llegada del nuevo artículo
+	nuevoArticulo->horaLlegada = clock();
+}
+
+
+// Función para disminuir los contadores de los artículos en una cola de prioridad
+void disminuirContadores(struct ColaPrioridad* cola, struct Metricas* metricas) {
+	// Inicialización de punteros y variables locales
+	struct Articulo* actual = cola->frente;  // Puntero al artículo actual
+	struct Articulo* previo = NULL;          // Puntero al artículo anterior
+	struct Articulo* aEliminar = NULL;       // Puntero al artículo que se eliminará
+	
+	// Recorre la cola de prioridad
+	while (actual != NULL) {
+		// Comprueba si el contador del artículo es mayor que cero (significa que aún tiene trabajo pendiente)
+		if (actual->contador > 0) {
+			// Reduce el contador de trabajo restante del artículo en una cantidad aleatoria entre 1 y 5
+			actual->contador -= (rand() % 5) + 1;
+			
+			// Verifica si el contador ha llegado a cero o menos (trabajo completado o excedido)
+			if (actual->contador <= 0) {
+				// Registra el tiempo de inicio antes de eliminar el artículo
+				clock_t horaInicio = clock();
+				
+				// Marca el artículo que se eliminará
+				aEliminar = actual;
+				
+				// Actualiza los punteros de la cola para eliminar el artículo
+				if (previo == NULL) {
+					cola->frente = actual->siguiente;
+				} else {
+					previo->siguiente = actual->siguiente;
+				}
+				
+				// Libera la memoria del artículo eliminado
+				free(aEliminar);
+				
+				// Registra el tiempo de finalización y calcula el tiempo transcurrido desde la llegada
+				clock_t horaFin = clock();
+				double tiempoTranscurrido = ((double)(horaFin - aEliminar->horaLlegada)) / CLOCKS_PER_SEC;
+				
+				// Actualiza las métricas con el tiempo de retorno y el rendimiento
+				metricas->tiempoDeRetorno += tiempoTranscurrido;
+				metricas->rendimiento++;
+			} else {
+				// Si el contador aún es mayor que cero, se actualizan los punteros
+				previo = actual;
+				actual = actual->siguiente;
+			}
+		} else {
+			// Si el contador ya es cero, se actualizan los punteros
+			previo = actual;
+			actual = actual->siguiente;
+		}
+	}
+}
+
+// Función para eliminar un artículo de máxima prioridad en la cola
+void eliminarMayorPrioridad(struct ColaPrioridad* cola) {
+	// Inicialización de punteros y variables locales
+	struct Articulo* actual = cola->frente;  // Puntero al artículo actual
+	struct Articulo* previo = NULL;          // Puntero al artículo anterior
+	struct Articulo* aEliminar = NULL;       // Puntero al artículo que se eliminará
+	
+	int maxPrioridad = 3;  // Nivel de prioridad máximo a eliminar (inicializado en 3)
+	
+	// Recorre la cola de prioridad
+	while (actual != NULL) {
+		// Comprueba si el artículo actual tiene la máxima prioridad
+		if (actual->prioridad == maxPrioridad) {
+			// Marca el artículo para eliminar
+			aEliminar = actual;
+			
+			// Actualiza los punteros de la cola para eliminar el artículo
+			if (previo == NULL) {
+				cola->frente = actual->siguiente;
+			} else {
+				previo->siguiente = actual->siguiente;
+			}
+			
+			// Libera la memoria del artículo eliminado
+			free(aEliminar);
+			
+			// Sale del bucle para eliminar solo un artículo de máxima prioridad
+			break;
+		} else {
+			// Si el artículo actual no tiene la máxima prioridad, actualiza los punteros y continúa buscando
+			previo = actual;
+			actual = actual->siguiente;
+		}
+	}
+	
+	// Si el puntero actual llega al final de la cola y todavía hay niveles de prioridad más bajos, decrementa el nivel
+	if (actual == NULL && maxPrioridad > 1) {
+		maxPrioridad--;
+	}
+}
+
+
+// Función para mostrar el contenido de la cola de prioridad
+void mostrarColaPrioridad(const struct ColaPrioridad* cola) {
+	// Imprime un encabezado para la cola
+	printf("Cola con prioridad:\n");
+	
+	// Inicializa un puntero al artículo actual en el frente de la cola
+	struct Articulo* actual = cola->frente;
+	
+	// Recorre la cola mientras haya artículos en ella
+	while (actual != NULL) {
+		// Imprime los detalles del artículo actual, incluyendo su ID, descripción, prioridad y contador
+		printf("ID: %d, Descripción: %s, Prioridad: %d, Contador: %d\n", actual->id, actual->descripcion, actual->prioridad, actual->contador);
+		
+		// Avanza al siguiente artículo en la cola
+		actual = actual->siguiente;
+	}
+}
+
+// Función para despachar artículos de la cola de prioridad basándose en el trabajo más corto
+void despacharPorTrabajoMasCorto(struct ColaPrioridad* cola, struct Metricas* metricas) {
+	// Verifica si la cola está vacía
+	if (cola->frente == NULL) {
+		printf("La cola de prioridad está vacía. No se pueden despachar artículos.\n");
+		return;
+	}
+	
+	// Inicializa punteros a artículos actuales y previos, y un puntero al artículo con el trabajo más corto
+	struct Articulo* actual = cola->frente;
+	struct Articulo* previo = NULL;
+	struct Articulo* trabajoMasCorto = NULL;
+	int tiempoMasCorto = INT_MAX;
+	
+	// Encuentra el artículo con el trabajo más corto
+	while (actual != NULL) {
+		// Verifica si el artículo es procesable (su contador es mayor que cero) y si su contador es menor que el tiempo más corto encontrado hasta ahora
+		if (actual->contador > 0 && actual->contador < tiempoMasCorto) {
+			trabajoMasCorto = actual;
+			tiempoMasCorto = actual->contador;
+		}
+		
+		// Actualiza los punteros de artículo actual y previo
+		previo = actual;
+		actual = actual->siguiente;
+	}
+	
+	// Si se encontró un artículo para despachar
+	if (trabajoMasCorto != NULL) {
+		// Registra el tiempo de inicio del proceso
+		clock_t horaInicio = clock();
+		
+		// Actualiza los punteros de la cola para eliminar el artículo con el trabajo más corto
+		if (previo == NULL) {
+			cola->frente = trabajoMasCorto->siguiente;
+		} else {
+			previo->siguiente = trabajoMasCorto->siguiente;
+		}
+		
+		// Libera la memoria del artículo despachado
+		free(trabajoMasCorto);
+		
+		// Registra el tiempo de finalización del proceso y calcula el tiempo transcurrido
+		clock_t horaFin = clock();
+		double tiempoTranscurrido = ((double)(horaFin - horaInicio)) / CLOCKS_PER_SEC;
+		
+		// Actualiza las métricas, incrementando el tiempo de retorno y el rendimiento
+		metricas->tiempoDeRetorno += tiempoTranscurrido;
+		metricas->rendimiento++;
+	}
+}
+
+
+// Función para despachar artículos de la cola de prioridad utilizando el algoritmo Round Robin
+void despacharPorRoundRobin(struct ColaPrioridad* cola, int quantum, struct Metricas* metricas) {
+	// Si la cola está vacía, muestra un mensaje y sale
+	if (cola->frente == NULL) {
+		printf("La cola de prioridad está vacía. No se pueden despachar artículos.\n");
+		return;
+	}
+	
+	// Inicializa un puntero al artículo actual y una variable para registrar la hora de inicio
+	struct Articulo* actual = cola->frente;
+	clock_t horaInicio;
+	
+	// Itera a través de los artículos en la cola
+	while (actual != NULL) {
+		// Verifica si el artículo es procesable (su contador es mayor que cero)
+		if (actual->contador > 0) {
+			// Calcula el tiempo a procesar, que es el mínimo entre el contador actual y el quantum
+			int tiempoAProcesar = (actual->contador < quantum) ? actual->contador : quantum;
+			
+			// Registra la hora de inicio del proceso
+			horaInicio = clock();
+			
+			// Actualiza el contador del artículo restando el tiempo procesado
+			actual->contador -= tiempoAProcesar;
+			
+			// Incrementa el rendimiento
+			metricas->rendimiento++;
+			
+			// Si el contador del artículo llega a cero o menos, se elimina de la cola
+			if (actual->contador <= 0) {
+				struct Articulo* aEliminar = actual;
+				actual = actual->siguiente;
+				
+				// Actualiza los punteros de frente y final de la cola si es necesario
+				if (cola->frente == aEliminar) {
+					cola->frente = actual;
+				}
+				if (cola->final == aEliminar) {
+					cola->final = NULL;
+				}
+				
+				// Libera la memoria del artículo eliminado
+				free(aEliminar);
+			} else {
+				actual = actual->siguiente;
+			}
+		} else {
+			actual = actual->siguiente;
+		}
+	}
+	
+	// Registra la hora de finalización del proceso y calcula el tiempo transcurrido
+	clock_t horaFin = clock();
+	double tiempoTranscurrido = ((double)(horaFin - horaInicio)) / CLOCKS_PER_SEC;
+	
+	// Actualiza el tiempo de retorno en las métricas
+	metricas->tiempoDeRetorno += tiempoTranscurrido;
+}
+
+// Función principal
+int main() {
+	
+	srand(time(NULL));
+	
+	int quantum;
+	struct ColaPrioridad colaPrioridad;
+	inicializarColaPrioridad(&colaPrioridad);
+	
+	struct Metricas metricas;
+	metricas.tiempoDeRetorno = 0.0;
+	metricas.rendimiento = 0;
+	
+	int prioridadAEliminar = 3;
+	int opcion;
+	struct Articulo* nuevoArticulo = NULL;
+	
+	// Genera y encola 10 artículos de prueba
+	for (int i = 0; i < 10; i++) {
+		nuevoArticulo = crearArticuloAleatorio();
+		encolarConPrioridad(&colaPrioridad, nuevoArticulo);
+	}
+	
+	// Bucle principal del programa con menú
+	while (1) {
+		printf("\nMenú:\n");
+		printf("1. Mostrar cola con prioridad y decrementar contadores\n");
+		printf("2. Eliminar artículo de máxima prioridad\n");
+		printf("3. Mostrar métricas (Tiempo de Retorno y Througput)\n");
+		printf("4. Agregar nuevo artículo a la cola\n");
+		printf("5. Despachar por Trabajo Más Corto\n");
+		printf("6. Despachar por Round Robin\n");
+		printf("0. Salir\n");
+		printf("Selecciona una opción: ");
+		scanf("%d", &opcion);
+		
+		// Lógica para cada opción del menú
+		switch (opcion) {
+		case 1:
+			mostrarColaPrioridad(&colaPrioridad);
+			disminuirContadores(&colaPrioridad, &metricas);
+			break;
+		case 2:
+			eliminarMayorPrioridad(&colaPrioridad);
+			printf("Artículo de prioridad %d eliminado.\n", prioridadAEliminar);
+			prioridadAEliminar--;
+			if (prioridadAEliminar < 1) {
+				prioridadAEliminar = 3;
+			}
+			break;
+		case 3:
+			printf("Métricas:\n");
+			printf("Tiempo de Retorno: %lf milisegundos\n", metricas.tiempoDeRetorno);
+			printf("Rendimiento: %lf elementos/segundo\n", metricas.rendimiento);
+			break;
+		case 4:
+			nuevoArticulo = crearArticuloAleatorio();
+			encolarConPrioridad(&colaPrioridad, nuevoArticulo);
+			printf("Nuevo artículo agregado a la cola.\n");
+			break;
+		case 5:
+			despacharPorTrabajoMasCorto(&colaPrioridad, &metricas);
+			printf("Despacho por Trabajo Más Corto completado.\n");
+			break;
+		case 6:
+			printf("Ingresa el valor del quantum para Round Robin: ");
+			scanf("%d", &quantum);
+			despacharPorRoundRobin(&colaPrioridad, quantum, &metricas);
+			printf("Despacho por Round Robin completado.\n");
+			break;
+		case 0:
+			printf("Saliendo del programa.\n");
+			break;
+		default:
+			printf("Opción no válida.\n");
+		}
+		
+		if (opcion == 0) {
+			break;
+		}
+	}
+	
+	// Libera la memoria de los artículos en la cola y del nuevo artículo
+	while (colaPrioridad.frente != NULL) {
+		struct Articulo* temp = colaPrioridad.frente;
+		colaPrioridad.frente = colaPrioridad.frente->siguiente;
+		free(temp);
+	}
+	
+	free(nuevoArticulo);
+	
+	return 0;
+}
